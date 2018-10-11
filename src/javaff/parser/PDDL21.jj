@@ -1,0 +1,1313 @@
+options
+{
+    LOOKAHEAD=20;
+    FORCE_LA_CHECK=true;
+    IGNORE_CASE=true;
+    STATIC=false;
+    OUTPUT_DIRECTORY="src/javaff/parser/";
+}
+
+PARSER_BEGIN(PDDL21parser)
+
+package javaff.parser;
+
+import javaff.JavaFF;
+import javaff.data.*;
+import javaff.data.strips.*;
+import javaff.data.metric.*;
+import javaff.data.temporal.*;
+import javaff.data.adl.*;
+import javaff.data.DomainRequirements;
+
+import java.io.PrintStream;
+import java.io.File;
+import java.io.FileReader;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Map;
+import java.util.Hashtable;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.Iterator;
+
+import java.math.BigDecimal;
+
+public class PDDL21parser
+{
+	public static UngroundProblem UP = new UngroundProblem();
+
+	/**
+	 * Destroy {@link PDDL21parser.UP}
+	 */
+	public static void reset()
+	{
+		UP = new  UngroundProblem();
+	}
+
+    public static UngroundProblem parseFiles(File pDomainFile, File pProblemFile)
+    {
+    	reset();
+		boolean probsuc = false;
+		boolean suc = parseDomainFile(pDomainFile);
+		if (suc) probsuc = parseProblemFile(pProblemFile);
+		if (probsuc) 
+		{
+			//ADL quantifiers (Exists and ForAll) need to have their quantified variables set up after the
+			//problem file has been parsed. The problem file cannot be swapped to be parsed first because
+			//constants present in the domain file are needed for grounding the initial and goal states.
+			//this method is the lesser of two evils.
+			UP.buildTypeSets(); //required for quantifier grounding		 //TODO find a better place to do this.
+			
+			UP.setupQuantifiers(); 
+			return UP;
+		}
+		else return null;
+    }
+
+    private static boolean parseDomainFile(File pFile)
+    {
+		boolean req = false;
+        try
+        {
+            FileReader tFileReader = new FileReader(pFile);
+			PDDL21parser parser = new PDDL21parser(tFileReader);
+            req = parser.parseDomain();
+            tFileReader.close();
+          }
+		catch (FileNotFoundException e)
+		{
+            System.out.println("File "+pFile+" has not been found");
+            req = false;
+		}
+		catch (IOException e)
+		{
+            System.out.println("Unknown IOException caught");
+            System.out.println(e.getMessage());
+            req = false;
+		}
+        catch (ParseException e)
+        {
+            System.out.println("Error whilst parsing file "+pFile);
+            System.out.println(e.getMessage());
+            req = false;
+        }
+        if (req) System.out.println("Parsed Domain file "+pFile+" successfully");
+		else System.out.println("Parsing of Domain file "+pFile+" failed");
+		return req;
+    }
+    
+    private static boolean parseProblemFile(File pFile)
+    {
+		boolean probsuc = true;
+        try
+        {
+            FileReader tFileReader = new FileReader(pFile);
+			PDDL21parser parser = new PDDL21parser(tFileReader);
+            parser.parseProblem();
+            tFileReader.close();
+		}
+		catch (FileNotFoundException e)
+		{
+            System.out.println("File "+pFile+" has not been found");
+            probsuc = false;
+		}
+		catch (IOException e)
+		{
+            System.out.println("Unknown IOException caught");
+            System.out.println(e.getMessage());
+            probsuc = false;
+		}
+        catch (ParseException e)
+        {
+            System.out.println("Error whilst parsing file "+pFile);
+            System.out.println(e.getMessage());
+            probsuc = false;
+        }
+        if (probsuc) System.out.println("Parsed Problem file "+pFile+" successfully");
+		else System.out.println("Parsing Problem file "+pFile+" failed");
+		return probsuc;
+    }
+	
+	private class TypedList
+	{
+		public List objects = new ArrayList();
+		public Map types = new Hashtable();    // Maps strings onto Types
+		
+		public void add(String s)
+		{
+			objects.add(s);
+			types.put(s,SimpleType.rootType);
+		}
+	
+		public void add(String s, Type t)
+		{
+			objects.add(s);
+			types.put(s,t);
+		}
+	}		
+}
+
+PARSER_END(PDDL21parser)
+
+SKIP :
+{
+    " "
+|   "\r"
+|   "\t"
+|   "\n"
+}
+
+TOKEN:
+{
+    < OPEN: "(" >
+|   < CLOSE: ")" >
+|   < DEFINE: "define" >
+|   < DOMAIN: "domain" >
+|   < DOMAIN_LABEL: ":domain" >
+|   < OBJECTS: ":objects" >
+|   < GOAL: ":goal" >
+|   < INIT: ":init" >
+|   < METRIC: ":metric" >
+|   < PROBLEM: "problem" >
+|   < REQUIREMENTS: ":requirements" >
+|   < REQUIREMENT_LABELS: ":typing" | ":strips" | ":equality" | ":fluents" | ":durative-actions" | ":duration-inequalities" | ":numeric-fluents" | ":action-costs" | ":adl" | ":negative-preconditions" | ":disjunctive-preconditions"  | ":existential-preconditions" | "universal-preconditions" | "quantified-preconditions" | ":conditional-effects"  | ":timed-initial-literals">
+|   < NON_HANDLED_LABELS: ":domain-axioms" | ":constraints" | ":preferences" | ":derived-predicates">
+|	< PDDL_1_7_LABELS: ":action-expansions" | ":foreach-expansions" | ":dag-expansions" | ":subgoal-through-axioms" | ":safety-constraints" | ":expression-evaluation" | ":open-world" | ":true-negation" | ":ucpop" >
+|   < TYPES: ":types" >
+|   < EITHER: "either" >
+|   < CONSTANTS: ":constants" >
+|   < PREDICATES: ":predicates" >
+|   < FUNCTIONS: ":functions" >
+|   < ACTION: ":action" >
+|   < DURATIVE_ACTION: ":durative-action">
+|   < PARAMETERS: ":parameters" >
+|   < DURATION: ":duration" >
+|   < DUR_VAR: "?duration" >
+|   < PRECONDITION: ":precondition" >
+|   < CONDITION: ":condition" >
+|   < EFFECT: ":effect" >
+| 	< AT: ": at" >
+| 	< AT_TIL: "at <NUMBER>" > //cannot be separated or parser because when the parser encounters a predicate called "at", it matches it against the token "AT", and fails because this is not a NAME token as expected
+|   < AND: "and" >
+| 	< OR: "or" >
+|   < NOT: "not" >
+| 	< IMPLY: "imply" >
+|   < OVER_ALL: "over all" >
+|   < AT_START: "at start" >
+|   < AT_END: "at end" >
+| 	< FOR_ALL: "forall" >
+| 	< EXISTS: "exists" >
+| 	< WHEN: "when" >
+|   < EQUALS: "=" >
+|   < TYPE_IDENT: "-" >
+|   < BINARY_OP:  "+" | "*" | "/" >
+|   < BINARY_COMP: "<" | ">" | "=" | ">=" | "<=" >
+|   < ASSIGN_OP: <ASSIGN> | <SCALE_UP> | <SCALE_DOWN> | <INCREASE> | <DECREASE> >
+|   < ASSIGN: "assign">
+|   < SCALE_UP: "scale-up">
+|   < SCALE_DOWN: "scale-down">
+|   < INCREASE: "increase">
+|   < DECREASE: "decrease">
+|   < OPTIMIZATION: <MINIMIZE>|<MAXIMIZE> >
+|   < MINIMIZE: "minimize">
+|   < MAXIMIZE: "maximize">
+|	< TOTAL_TIME: "total-time">
+|   < NUMBER_TYPE: "number">
+|   < VAR: "?" <NAME> >
+|   < NUMBER: (["0"-"9"])+ ("." (["0"-"9"])+)? >
+|   < NAME: (["a"-"z", "_", "A"-"Z", "0"-"9", "-"])+ >
+//|   < NAME: (["a"-"z", "_", "A"-"Z", "-"])+ >
+}
+
+SPECIAL_TOKEN: 
+{
+    <SINGLE_LINE_COMMENT: (";")+ (~["\n", "\r"])* ("\n" | "\r" | "\r\n")>
+}
+
+// ******************************************************************************
+// *																			*
+// * 							Parse the Domain File							*
+// *																			*
+// ******************************************************************************
+
+boolean parseDomain():
+{
+    Token t;
+	boolean req = true;
+}
+{
+    <OPEN>  <DEFINE>  <OPEN> <DOMAIN> t=<NAME> <CLOSE>
+    {
+		UP.DomainName = t.toString().toLowerCase();
+    }
+    (req = parseRequireDef())?
+	{if (!req) return false;}
+    (parseTypeDef())?
+    (parseConstantsDef())?
+    (parsePredicatesDef())?
+    (parseFunctionsDef())?
+    (parseStructureDef())*
+    <CLOSE>
+    <EOF>
+	{return true;}
+}
+
+
+// ***************************************************
+// *	Parse the requirement definitions
+// ***************************************************
+boolean parseRequireDef():
+{
+	Token t;
+	UP.requirements = new DomainRequirements();
+}
+{
+     <OPEN> <REQUIREMENTS> 
+	 (
+	     	( t = <REQUIREMENT_LABELS> 
+	    	 {
+	    	   String req = t.toString();
+	    	   
+	    	   //I freely admit this is not my finest coding hour...
+				if (req.equals(":typing"))
+					UP.requirements.addRequirement(Requirement.Typing);
+				else if (req.equals(":fluents"))
+					UP.requirements.addRequirement(Requirement.Fluents);
+				else if (req.equals(":durative-actions"))
+					UP.requirements.addRequirement(Requirement.DurativeActions);
+				else if (req.equals(":duration-inequalities"))
+					UP.requirements.addRequirement(Requirement.DurationInequalities);
+				else if (req.equals(":numeric-fluents"))
+					UP.requirements.addRequirement(Requirement.NumericFluents);
+				else if (req.equals(":action-costs"))
+					UP.requirements.addRequirement(Requirement.ActionCosts);
+				else if (req.equals(":adl"))
+					UP.requirements.addRequirement(Requirement.ADL);
+				else if (req.equals(":negative-preconditions"))
+					UP.requirements.addRequirement(Requirement.NegativePreconditions);
+				else if (req.equals(":disjunctive-preconditions"))
+					UP.requirements.addRequirement(Requirement.DisjunctivePreconditions);
+				else if (req.equals(":existential-preconditions"))
+					UP.requirements.addRequirement(Requirement.ExistentialPreconditions);
+				else if (req.equals(":universal-preconditions"))
+					UP.requirements.addRequirement(Requirement.UniversalPreconditions);
+				else if (req.equals(":quantified-preconditions"))
+					UP.requirements.addRequirement(Requirement.QuantifiedPreconditions);
+				else if (req.equals(":conditional-effects"))
+					UP.requirements.addRequirement(Requirement.ConditionalEffects);
+				else if (req.equals(":timed-initial-literals"))
+					UP.requirements.addRequirement(Requirement.TimedInitialLiterals);
+				else if (req.equals(":domain-axioms"))
+					UP.requirements.addRequirement(Requirement.DomainAxioms);
+				else if (req.equals(":constraints"))
+					UP.requirements.addRequirement(Requirement.Constraints);
+				else if (req.equals(":preferences"))
+					UP.requirements.addRequirement(Requirement.Preferences);
+				else if (req.equals(":derived-predicates"))
+					UP.requirements.addRequirement(Requirement.DerivedPredicates);
+				else if (req.equals(":strips"))
+					UP.requirements.addRequirement(Requirement.Strips);
+				else if (req.equals(":equality"))
+					UP.requirements.addRequirement(Requirement.Equality);
+		     }
+			)
+	     |
+		    ( t = <NON_HANDLED_LABELS> 
+		     {
+		     	System.out.println("Unsupported requirement tag: "+t.toString().toLowerCase()); return false; 
+	     	 }
+		    )
+	     |
+		    ( t = <PDDL_1_7_LABELS> 
+		     {
+		     	System.out.println("PDDL 1.7 tags not supported: "+t.toString().toLowerCase()); return false; 
+		     }
+			)
+	 )*
+     
+     <CLOSE> 
+     {
+     	return true;
+     }
+}
+
+// ***************************************************
+// *	Parse the type definitions
+// ***************************************************
+void parseTypeDef():
+{
+    Type t;
+	Set types;	
+}
+{
+    <OPEN> <TYPES> 
+	({types = new HashSet();}
+	(t=parsePrimitiveType()
+	{ 
+		types.add(t);
+		UP.typeGraph.addType(t);
+	}
+	)+ 
+	(<TYPE_IDENT> t=parseType()
+	{
+		Iterator tit = types.iterator();
+		while (tit.hasNext())
+		{
+			SimpleType type = (SimpleType) tit.next();
+			type.setSuperType(t);
+			UP.typeGraph.addType(type, t);
+		}
+	}
+	))*
+	(t=parsePrimitiveType()
+	 {
+	 	UP.typeGraph.addType(t);
+	 })*
+	<CLOSE>
+}
+
+Type parseType():
+{
+	Type t;
+}
+{
+	(
+	t = parsePrimitiveType()
+|	t = parseEitherType()
+	)
+	{ return t; }
+}
+
+SimpleType parsePrimitiveType():
+{
+	Token t;
+}
+{
+	t=<NAME>
+	{
+		String typeStr = t.toString().toLowerCase();
+		SimpleType type = (SimpleType) UP.typeMap.get(typeStr);
+		if (type == null)
+		{
+			type = new SimpleType(typeStr);
+			UP.types.add(type);
+			UP.typeMap.put(typeStr, type);
+		}
+		return type;
+	}
+}
+
+EitherType parseEitherType():
+{
+	EitherType et = new EitherType();
+	SimpleType st;
+}
+{
+	<OPEN> <EITHER> (st = parsePrimitiveType() { et.addType(st); } )+ <CLOSE>
+	{ return et; }
+}
+
+// ***************************************************
+// *	Parse a TypedList
+// ***************************************************
+TypedList parseTypedList() :{  List<String> strings;  Type type;  Token t;  TypedList rList = new TypedList();}{
+  (	    
+	  {
+	    strings = new ArrayList<String>();
+	  	type = new SimpleType("object"); //may be no explicit type declaration, so assume its just any type -- will get overwritten if there is a type
+	  }	  (	    (	      (	        (	          (t = < NAME >)	          | 
+	          (t = < VAR >)	        )	        {	          strings.add(t.toString().toLowerCase());	        }	      )+	      (< TYPE_IDENT > type = parseType())? //may or may not be a type!	      {	        for (String string : strings)	        {	          rList.add(string, type);	        }	      }//	      (//	        tList = parseTypedList() //causes stack overflow on large grid problems//	        {//	          rList.objects.addAll(tList.objects);//	          rList.types.putAll(tList.types);//	        }//	      )	    )	    | //fairlysure this OR block for untyped parameters is unnecessary --but left in as it is harmless	    (	      (	        (	          (t = < NAME >)	        | (t = < VAR >)	        )	        {	          rList.add(t.toString().toLowerCase());	        }	      )+	    )	  )
+	)* //allow iterative list parsing rather than recursive  {    return rList;  }}
+
+
+
+// ***************************************************
+// *	Parse the constants
+// ***************************************************
+
+void parseConstantsDef():
+{
+	TypedList tl;
+}
+{
+	<OPEN> <CONSTANTS> tl=parseTypedList() <CLOSE>
+	{
+		Iterator it = tl.objects.iterator();
+		while (it.hasNext())
+		{
+			String str = (String) it.next();
+//			PDDLObject c =  new PDDLObject(str);
+			Constant c = new Constant(str);
+			c.setType((Type)tl.types.get(str));
+			UP.constants.add(c);
+			UP.constantMap.put(str, c);
+		}			
+	}
+}
+
+// ***************************************************
+// *	Parse the predicates
+// ***************************************************
+
+void parsePredicatesDef():
+{
+}
+{
+    <OPEN> <PREDICATES> (parsePredicate())+ <CLOSE>
+}
+
+void parsePredicate():
+{
+    PredicateSymbol ps;
+	TypedList tl;
+}
+{
+    <OPEN> ps=parsePredicateSymbol() 
+	
+	tl = parseTypedList()
+	{
+		Iterator it = tl.objects.iterator();
+		while (it.hasNext())
+		{
+			String str = (String) it.next();
+			Variable v =  new Variable(str);
+			v.setType((Type)tl.types.get(str));
+			ps.addVar(v);
+		}		
+		UP.predSymbols.add(ps);
+	}
+	<CLOSE>
+}
+
+PredicateSymbol parsePredicateSymbol():
+{
+    Token t;
+}
+{
+    t=<NAME> 
+	{
+		PredicateSymbol ps = (PredicateSymbol) UP.predSymbolMap.get(t.toString().toLowerCase());
+		if (ps == null)
+		{
+			ps = new PredicateSymbol(t.toString().toLowerCase());
+			UP.predSymbolMap.put(t.toString().toLowerCase(), ps);
+		}
+		return ps;
+	}
+}
+
+// ***************************************************
+// *	Parse a STRIPS action
+// ***************************************************
+
+void parseStructureDef():
+{
+}
+{
+    parseActionDef()
+|   parseDurActionDef()
+}
+
+void parseActionDef():
+{
+    UngroundInstantAction a = new UngroundInstantAction();
+    TypedList tl = null;
+	Map varMap = new Hashtable();
+}
+{
+    <OPEN> <ACTION> a.name=parseOperatorName() <PARAMETERS> ((<OPEN> tl=parseTypedList() <CLOSE>) | (<OPEN> <CLOSE>))
+    {
+		UP.actions.add(a);
+		
+		if (tl != null)
+		{
+			Iterator it = tl.objects.iterator();
+			while (it.hasNext())
+			{
+				String str = (String) it.next();
+				Variable v = new Variable(str);
+				v.setType((Type) tl.types.get(str));
+				a.params.add(v);
+				varMap.put(str,v);
+			}
+		}
+    }
+	parseActionDefBody(a, varMap) <CLOSE>
+}
+
+OperatorName parseOperatorName():
+{
+    Token t;
+}
+{
+    t=<NAME> {return new OperatorName(t.toString().toLowerCase()); }
+}
+
+void parseActionDefBody(UngroundInstantAction a, Map varMap):
+{
+	Fact c = TrueCondition.getInstance();
+	Fact e = TrueCondition.getInstance();
+}
+{
+    ( <PRECONDITION> c = parseGD(varMap, false) { a.condition = (UngroundFact) c;})?
+    ( <EFFECT> e = parseEffect(varMap) { a.effect = (UngroundFact) e; })?
+}
+
+// **********************************
+// *	Parse Goal Definition
+// **********************************
+
+// Map m is the variableMap
+// boolean ground is whether it is ground or not (i.e. in an action or in the initial state)
+Fact parseGD(Map m, boolean ground):
+{
+	Literal p; //may be single or compound... should really fix one day to be in separate methods
+	SingleLiteral s;
+	Fact c, a, b;
+	TypedList vars;
+	Variable v;
+	And and;
+	Or or;
+	ForAll forall;
+	Exists exists;
+	Imply imply;
+	Equals equals;
+}
+{
+	(<OPEN> <CLOSE> { return TrueCondition.getInstance(); })
+|	(<OPEN> <AND> {and = new And();} (c = parseGD(m, ground) { and.add(c);} )* <CLOSE> {return and;})
+|	(<OPEN> <OR> {or = new Or();} (c = parseGD(m, ground) { or.add(c);} )* <CLOSE> {return or;})
+//|	(<OPEN> <NOT> s = parseAtomicFormula(m, false) <CLOSE> {return new Not(s);})
+|	(<OPEN> <NOT> c = parseGD(m, ground) <CLOSE> {return new Not(c);})
+|	(<OPEN> <FOR_ALL> forall = parseForAll(m, ground) <CLOSE> { return forall; })
+|	(<OPEN> <EXISTS> exists = parseExists(m, ground) <CLOSE> { return exists; })
+| 	(<OPEN> <IMPLY> imply = parseImply(m, ground) <CLOSE> { return imply; })
+|   (<OPEN> <EQUALS> equals = parseEquals(m, ground) <CLOSE> { return equals; })
+|	(s = parseAtomicFormula(m, ground) {return s;})
+|	(c = parseFComp(m) {return c;})
+}
+
+Equals parseEquals(Map m, boolean ground):
+{
+	Equals equals;
+	Fact a, b;
+	TypedList tl;
+}
+{
+	tl = parseTypedList()
+	{			
+		equals = new Equals();
+		Iterator it = tl.objects.iterator();
+		while (it.hasNext())
+		{
+			String str = (String) it.next();
+			Parameter o = null;
+			if (m != null) 
+				o = (Parameter) m.get(str);
+            if (o == null) 
+            	o = (Parameter) UP.constantMap.get(str);
+            if (o == null) 
+            	o = (Parameter) UP.objectMap.get(str);
+            
+            equals.addParameter(o);
+		}
+
+		return equals;
+	}
+}
+
+Imply parseImply(Map m, boolean ground):
+{
+	Imply imply;
+	Fact a, b;
+}
+{
+	//<OPEN> <IMPLY>
+			a = parseGD(m, ground)
+			b = parseGD(m, ground)
+	//		< CLOSE >
+		{
+			imply = new Imply(a, b);
+	 		return imply;
+		}
+}
+
+ForAll parseForAll(Map m, boolean ground):
+{
+  ForAll forall;
+  TypedList vars;
+  Variable v;
+  Fact c;
+  String s;
+}
+{
+  <OPEN> 
+		//<FOR_ALL> <OPEN> 
+		vars = parseTypedList()
+		{
+			Iterator it = vars.objects.iterator();
+			if (vars.objects.size() > 1)
+			{
+			  	throw new IllegalArgumentException("Too many FORALL quantifiers");
+			}
+			else
+			{
+				String str = (String) it.next();
+				v = new Variable(str);
+				v.setType((Type) vars.types.get(str));
+				
+				m.put(str, v); //need to add extra, non parameter-variables here or grounding wont work
+			}
+		}
+		<CLOSE>
+	(c = parseGD(m, ground))
+	//<CLOSE> 
+	{
+		forall = new ForAll(v, c, UP.typeSets.get(v.getType())); 
+		return forall;
+	}
+}
+
+Exists parseExists(Map m, boolean ground):
+{
+  Exists exists;
+  TypedList vars;
+  Variable v;
+  Fact c;
+  String s;
+}
+{
+  <OPEN> 
+		vars = parseTypedList()
+		{
+			Iterator it = vars.objects.iterator();
+			if (vars.objects.size() > 1)
+			{
+			  	throw new IllegalArgumentException("Too many EXISTS quantifiers");
+			}
+			else
+			{
+				String str = (String) it.next();
+				v = new Variable(str);
+				v.setType((Type) vars.types.get(str));
+				
+				m.put(str, v); //need to add extra, non parameter-variables here or grounding wont work
+			}
+		}
+	<CLOSE>
+	(c = parseGD(m, ground))
+	//<CLOSE> 
+	{
+		exists = new Exists(v, c, UP.typeSets.get(v.getType())); 
+		return exists;
+	}
+}
+
+
+SingleLiteral parseAtomicFormula(Map m, boolean ground):
+{
+	PredicateSymbol p;
+	TypedList tl;
+}
+{
+	<OPEN> p = parsePredicateSymbol() tl = parseTypedList() <CLOSE>
+	{
+		SingleLiteral lit;
+		if (ground) 
+			lit = new Proposition(p);
+		else lit = new Predicate(p);
+			Iterator it = tl.objects.iterator();
+			
+		while (it.hasNext())
+		{
+			String str = (String) it.next();
+			Parameter o = null;
+			if (m != null) 
+				o = (Parameter) m.get(str);
+            if (o == null) 
+            	o = (Parameter) UP.constantMap.get(str);
+            if (o == null) 
+            	o = (Parameter) UP.objectMap.get(str);
+            
+            //hack... but I can't remember why I did it...
+            if (lit instanceof Proposition)
+				((Proposition)lit).addParameter(o);
+			else
+				((Predicate)lit).addParameter(o);
+		}
+		return lit;
+	}
+}
+
+
+
+// **********************************
+// *	Parse Fact
+// **********************************
+
+Fact parseEffect(Map m):
+{
+	Fact c;
+	And and;
+}
+{
+	(<OPEN> <CLOSE> { return new NullFact(); })
+|	(c = parseCEffect(m) { return c; })
+|	(<OPEN> <AND> {and = new And();} (c = parseCEffect(m) { and.add(c);} )* <CLOSE> {return and;})
+}
+
+Fact parseCEffect(Map m):
+{	Fact condition = TrueCondition.getInstance();
+  	Fact effect = TrueCondition.getInstance();
+}
+{
+	(<OPEN> <FOR_ALL> condition = parseForAll(m, false) effect = parseEffect(m) <CLOSE>) 
+|	(<OPEN> <WHEN> (condition = parseGD(m, false)) (effect = parseConditionalEffect(m)) <CLOSE>)
+|	(effect = parsePEffect(m) { return effect; })
+
+  
+	{		return new ConditionalEffect(condition, effect);
+	}
+  
+}
+
+Fact parseConditionalEffect(Map m):
+{
+	And and;
+	Fact effect = TrueCondition.getInstance();
+}
+{
+	( <OPEN> <AND> {and = new And(); } (effect = parsePEffect(m))* {and.add(effect);})
+|	(effect = parsePEffect(m) { return effect; })
+}
+
+Fact parsePEffect(Map m):
+{
+	SingleLiteral p;
+	ResourceOperator ro;
+}
+{
+	(p = parseAtomicFormula(m, false) {return p;})
+|	(<OPEN> <NOT> p = parseAtomicFormula(m, false) <CLOSE> {return new Not(p);})
+|	ro = parseResourceOperator(m) {return ro;}
+}
+
+// ***************************************************
+// *	Parse Metrics
+// ***************************************************
+
+
+// **********************************
+// *	Parse Function Definitions
+// **********************************
+
+void parseFunctionsDef():
+{
+	TypedList tl;
+}
+{
+	<OPEN> <FUNCTIONS> (parseFunctionSkeleton())+ <CLOSE>
+}
+
+void parseFunctionSkeleton():
+{
+    FunctionSymbol fs;
+	TypedList tl;
+}
+{
+    <OPEN> fs=parseFunctionSymbol()
+	
+	tl = parseTypedList()
+	{
+		Iterator it = tl.objects.iterator();
+		while (it.hasNext())
+		{
+			String str = (String) it.next();
+			Variable v =  new Variable(str);
+			v.setType((Type)tl.types.get(str));
+			fs.addVar(v);
+		}		
+		UP.funcSymbols.add(fs);
+	}
+	<CLOSE> (<TYPE_IDENT> <NUMBER_TYPE>)?
+}
+
+FunctionSymbol parseFunctionSymbol():
+{
+    Token t;
+}
+{
+    t=<NAME>
+	{
+		FunctionSymbol fs = (FunctionSymbol) UP.funcSymbolMap.get(t.toString().toLowerCase());
+		if (fs == null)
+		{
+			fs = new FunctionSymbol(t.toString().toLowerCase());
+			UP. funcSymbolMap.put(t.toString().toLowerCase(), fs);
+		}
+		return fs;
+	}
+}
+
+// **********************************
+// *	Parse Function Comparators
+// **********************************
+
+BinaryComparator parseFComp(Map varMap):
+{
+	Token t1;
+	Function f1, f2;
+	
+}
+{
+	<OPEN> t1=<BINARY_COMP> f1=parseFExp(varMap) f2=parseFExp(varMap) <CLOSE>
+	{
+		BinaryComparator bc = new BinaryComparator(t1.toString().toLowerCase(), f1, f2);
+		return bc;
+	}
+}
+
+Function parseFExp(Map varMap):
+{
+	Token t1;
+	Function f1, f2;
+}
+{
+	(t1 = <NUMBER> {return new NumberFunction(Double.parseDouble(t1.toString().toLowerCase()));})
+|	(<OPEN> t1=<BINARY_OP> f1=parseFExp(varMap) f2=parseFExp(varMap) <CLOSE>
+	{
+		BinaryFunction bf = new BinaryFunction(t1.toString().toLowerCase(), f1, f2);
+		return bf;
+	})
+|	(<OPEN> t1=<TYPE_IDENT> f1=parseFExp(varMap) f2=parseFExp(varMap) <CLOSE>
+	{
+		BinaryFunction bf = new BinaryFunction(t1.toString().toLowerCase(), f1, f2);
+		return bf;
+	})
+|	(<OPEN> t1=<TYPE_IDENT> f1=parseFExp(varMap) <CLOSE>
+	{
+		BinaryFunction bf = new BinaryFunction(t1.toString().toLowerCase(), new NumberFunction(0), f1);
+		return bf;
+	})
+|	(f1 = parseFHead(varMap) {return f1;})
+}
+
+NamedFunction parseFHead(Map varMap):
+{
+	FunctionSymbol f;
+	TypedList tl;
+}
+{
+	(<OPEN> f = parseFunctionSymbol() tl = parseTypedList() <CLOSE>
+	{
+		NamedFunction nf = new NamedFunction(f);
+		Iterator it = tl.objects.iterator();
+		while (it.hasNext())
+		{
+			String str = (String) it.next();
+			Parameter o = null;
+			if (varMap != null) o = (Parameter) varMap.get(str);
+            if (o == null) o = (Parameter) UP.constantMap.get(str);
+            if (o == null) o = (Parameter) UP.objectMap.get(str);
+			nf.addParameter(o);
+		}
+		return nf;
+	})
+	
+|	((<OPEN>)? <TOTAL_TIME> (<CLOSE>)? { return TotalTimeFunction.getInstance();})
+|	(f = parseFunctionSymbol()
+	{
+		NamedFunction nf = new NamedFunction(f);
+		return nf;
+	})
+}
+
+// **********************************
+// *	Parse Resource Operators
+// **********************************
+
+ResourceOperator parseResourceOperator(Map varMap):
+{
+	Token t1; 
+	NamedFunction f1;
+	Function f2;
+}
+{
+	<OPEN> t1=<ASSIGN_OP> f1=parseFHead(varMap) f2=parseFExp(varMap) <CLOSE>
+	{
+		return new ResourceOperator(t1.toString().toLowerCase(), f1, f2);
+	}
+}
+
+// ***************************************************
+// *	Parse Temporal
+// ***************************************************
+
+// **********************************
+// *	Parse Durative Action
+// **********************************
+
+void parseDurActionDef():
+{
+    UngroundDurativeAction a = new UngroundDurativeAction();
+    TypedList tl;
+	Map varMap = new Hashtable();
+}
+{
+    <OPEN> <DURATIVE_ACTION> a.name=parseOperatorName() <PARAMETERS> <OPEN> tl=parseTypedList() <CLOSE> 
+    {
+		UP.actions.add(a);
+		Iterator it = tl.objects.iterator();
+		while (it.hasNext())
+		{
+			String str = (String) it.next();
+			Variable v = new Variable(str);
+			v.setType((Type) tl.types.get(str));
+			a.params.add(v);
+			varMap.put(str,v);
+		}
+    }
+	parseDurativeActionDefBody(a, varMap) {a.makeInstants();} <CLOSE>
+}
+
+void parseDurativeActionDefBody(UngroundDurativeAction da, Map varMap):
+{
+	DurationConstraint dc;
+}
+{
+	<DURATION> dc=parseDurationConstraint(da, varMap) {da.durationConstraint = dc;}
+	(	  <CONDITION> parseDAGD(da, varMap)
+	)?
+	(	  <EFFECT> parseDAEffect(da, varMap)
+	)?
+}
+
+// **********************************
+// *	Parse Durative Action Conditions
+// **********************************
+
+void parseDAGD(UngroundDurativeAction da, Map varMap):
+{
+}
+{
+	parseTimedGD(da, varMap)
+|	(<OPEN> <AND> (parseTimedGD(da, varMap))+ <CLOSE>)
+}
+
+void parseTimedGD(UngroundDurativeAction da, Map varMap):
+{
+	Fact c;
+}
+{
+	(<OPEN> <AT_START> c=parseGD(varMap, false) <CLOSE> { ((And) da.startCondition).add(c); })
+|	(<OPEN> <AT_END> c=parseGD(varMap, false) <CLOSE> { ((And) da.endCondition).add(c); })
+|	(<OPEN> <OVER_ALL> c=parseGD(varMap, false) <CLOSE> { ((And) da.invariant).add(c); })
+}
+
+// **********************************
+// *	Parse Duration
+// **********************************
+
+DurationConstraint parseDurationConstraint(UngroundDurativeAction da, Map varMap):
+{
+	SimpleDurationConstraint sdc;
+	DurationConstraint dc;
+}
+{
+	(<OPEN> <AND> {dc = new DurationConstraint();} (sdc = parseSimpleDurationConstraint(da, varMap)
+	{
+		dc.add(sdc);
+	}
+	)+ <CLOSE> {return dc;})
+|	sdc = parseSimpleDurationConstraint(da, varMap) {return sdc; }
+//| 	(< OPEN ><CLOSE >//	{//	  return sdc;//	}
+}
+
+SimpleDurationConstraint parseSimpleDurationConstraint(UngroundDurativeAction da, Map varMap):
+{
+	int t;
+	Function f;
+}
+{
+	<OPEN> t=parseDOp() <DUR_VAR> f=parseFExp(varMap) <CLOSE>
+	{
+		SimpleDurationConstraint s = new SimpleDurationConstraint(da.duration, f, t);
+		return s;
+	}
+}
+
+int parseDOp():
+{
+	Token t;
+}
+{
+	(t=<BINARY_COMP> | t=<EQUALS>)
+	{
+		int i = MetricSymbolStore.getType(t.toString().toLowerCase());
+		if (i == MetricSymbolStore.LESS_THAN) i = MetricSymbolStore.LESS_THAN_EQUAL;
+		else if (i == MetricSymbolStore.GREATER_THAN) i = MetricSymbolStore.GREATER_THAN_EQUAL;
+		return i;
+	}
+
+}
+
+// **********************************
+// *	Parse Durative Action Effects
+// **********************************
+
+void parseDAEffect(UngroundDurativeAction da, Map varMap):
+{
+}
+{
+	parseTimedEffect(da, varMap)
+|	(<OPEN> <AND> (parseDAEffect(da, varMap))* <CLOSE>) 
+}
+
+void parseTimedEffect(UngroundDurativeAction da, Map varMap):
+{
+	Fact e;
+}
+{
+	(<OPEN> <AT_START> e=parseEffect(varMap) <CLOSE> {((And)da.startEffect).add(e);})
+|	(<OPEN> <AT_START> e=parseFAssignDA(da, varMap) <CLOSE> {((And)da.startEffect).add(e);})
+|	(<OPEN> <AT_END> e=parseEffect(varMap) <CLOSE> {((And)da.endEffect).add(e);})
+|	(<OPEN> <AT_END> e= parseFAssignDA(da, varMap) <CLOSE> {((And)da.endEffect).add(e);})
+}
+
+ResourceOperator parseFAssignDA(UngroundDurativeAction da, Map varMap):
+{
+	Token t1; 
+	NamedFunction f1;
+	Function f2;
+}
+{
+	<OPEN> t1=<ASSIGN_OP> f1=parseFHead(varMap) f2=parseFExpDA(da,varMap) <CLOSE>
+	{
+		return new ResourceOperator(t1.toString().toLowerCase(), f1, f2);
+	}
+}
+
+Function parseFExpDA(UngroundDurativeAction da, Map varMap):
+{
+	Token t1;
+	Function f1, f2;
+}
+{
+	(t1 = <NUMBER> {return new NumberFunction(Double.parseDouble(t1.toString().toLowerCase()));})
+|	(<OPEN> t1=<BINARY_OP> f1=parseFExpDA(da, varMap) f2=parseFExpDA(da, varMap) <CLOSE>
+	{
+		BinaryFunction bf = new BinaryFunction(t1.toString().toLowerCase(), f1, f2);
+		return bf;
+	})
+|	(<OPEN> t1=<TYPE_IDENT> f1=parseFExpDA(da, varMap) f2=parseFExpDA(da, varMap) <CLOSE>
+	{
+		BinaryFunction bf = new BinaryFunction(t1.toString().toLowerCase(), f1, f2);
+		return bf;
+	})
+|	(<OPEN> t1=<TYPE_IDENT> f1=parseFExpDA(da, varMap) <CLOSE>
+	{
+		BinaryFunction bf = new BinaryFunction(t1.toString().toLowerCase(), new NumberFunction(0), f1);
+		return bf;
+	})
+|	(<DUR_VAR> {return da.duration;})
+|	(f1 = parseFExp(varMap) {return f1;})
+}
+
+
+
+
+// ******************************************************************************
+// *																			*
+// * 							Parse the Problem File							*
+// *																			*
+// ******************************************************************************
+
+boolean parseProblem():
+{
+    Token t, t2;
+}
+{
+    <OPEN> <DEFINE> <OPEN> <PROBLEM> t=<NAME> <CLOSE>
+    <OPEN> <DOMAIN_LABEL> t2=<NAME> <CLOSE>
+    {
+		UP.ProblemName = t.toString().toLowerCase();
+		UP.ProblemDomainName = t2.toString().toLowerCase();
+		if (!UP.DomainName.toLowerCase().equals(t2.toString().toLowerCase())) 
+			System.out.println("Warning Domain Name and Problem Name do not match");
+    }
+    
+    (parseRequireDef())?
+    (parseObjectDeclaration())?
+    parseInit()
+    (parseGoal())?
+    {
+	    if (UP.goal == null)
+			UP.goal = new And();
+	}
+	(parseMetric())?
+    <CLOSE> <EOF>
+    { return true; }
+}
+
+
+// ***************************************************
+// *	Parse the objects
+// ***************************************************
+
+void parseObjectDeclaration():
+{
+    TypedList tl;
+}
+{
+    <OPEN> <OBJECTS> tl=parseTypedList() <CLOSE>
+	{
+		Iterator it = tl.objects.iterator();
+		while (it.hasNext())
+		{
+			String str = (String) it.next();
+			Type type = (Type) tl.types.get(str);
+			PDDLObject o = new PDDLObject(str, type);
+			
+						
+				
+			//problems arise if there is an object which has the same name as a constant -- actions
+			//and facts may not have the same type information for the "same" literal. In this situation
+			//constants take precedence as they may be have already been parsed in the Domain file (as
+			//a parameter in an action schema). The object is ignored, regardless of whether the types
+			//are different. This is clearly not perfect, but I have been trying to find out the source
+			//of a grounding bug for several hours now- and I don't care about design anymore.
+			if (UP.constantMap.containsKey(str))
+			{
+				//these 3 lines will remove the CONSTANT instead -- but there is no check to see
+				//if the constant is already being used inside an action schema 
+//				Constant duplicate = UP.constantMap.remove(str);
+//				UP.constants.remove(duplicate);
+//				UP.typeSets.get(type).remove(duplicate);				
+				
+                o = UP.constantMap.get(str);
+			}	
+			
+			UP.objects.add(o);
+			UP.objectMap.put(str, o);
+			
+			if (UP.typeSets.containsKey(type) == false)
+				UP.typeSets.put(type, new HashSet());
+	
+			UP.typeSets.get(type).add(o);
+		}
+    } 
+    
+}
+
+// ***************************************************
+// *	Parse the Initial State
+// ***************************************************
+
+void parseInit():
+{
+}
+{
+    <OPEN> <INIT> (parseInitEl())+ <CLOSE>
+}
+
+void parseInitEl():
+{
+  	Literal l;
+    TimedInitialLiteral til;
+	Token t1;
+	NamedFunction nf;
+	Fact f;
+}
+{
+	til = parseTIL()
+	{	  UP.tils.add(til);
+	}
+|	<OPEN> <EQUALS> nf = parseFHead(null) t1 = <NUMBER> <CLOSE>
+	{
+		UP.funcValues.put(nf, new BigDecimal(Double.parseDouble(t1.toString().toLowerCase())));
+	}
+|
+	f = parseLiteralName()
+	{
+		UP.initial.add(f);
+	}
+}
+
+TimedInitialLiteral parseTIL():
+{	TimedInitialLiteral til;
+	Token timeTok, numTok;
+	BigDecimal time, number;
+	Fact fact;
+//	NamedFunction namedFunction;
+}
+{	< OPEN > <NAME> timeTok = < NUMBER > //TODO this should really have its own TIL token -- but this break JavaCC -- probably possible, but I don't know how to fix it...
+		(		  fact = parseLiteralName()
+		)
+//		|
+//		(//		  <OPEN> <EQUALS> namedFunction = parseFHead(null) numTok = <NUMBER> <CLOSE>//		  {//			 UP.funcValues.put(namedFunction, new BigDecimal(Double.parseDouble(numTok.toString().toLowerCase())));//		  }//		)
+	<CLOSE >
+	{
+	  time = new BigDecimal(Double.parseDouble(timeTok.toString()));
+
+	  til = new TimedInitialLiteral((Literal) fact, time);
+	  return til;	}
+}
+
+Fact parseLiteralName():
+{
+    Fact pp;
+}
+{
+    pp = parseAtomicFormula(UP.objectMap, true)
+    {
+      return pp;
+    }
+  	|
+  	<OPEN> <NOT> pp = parseAtomicFormula(UP.objectMap, true) < CLOSE >  	{  	   return new Not(pp);
+  	}
+}
+
+// **********************************
+// *	Parse Goal
+// **********************************
+
+void parseGoal():
+{
+	Fact e;
+}
+{
+    <OPEN> <GOAL> e = parseGD(UP.objectMap, true) <CLOSE>
+	{ UP.goal = (GroundFact) e; }
+}
+
+// **********************************
+// *	Parse Metric
+// **********************************
+
+void parseMetric():
+{
+	MetricType type;
+	Function f1;
+}
+{
+	<OPEN> <METRIC> type=parseOptimization() f1=parseFExp(UP.objectMap) <CLOSE>
+	{
+		UP.metric = new Metric(type, f1);
+	}
+}
+
+MetricType parseOptimization():
+{
+	Token t1;
+}
+{
+	t1=<OPTIMIZATION> 
+	{
+		if (t1.toString().toLowerCase().equals("minimize")) return MetricType.Minimize;
+		else if (t1.toString().toLowerCase().equals("maximize")) return MetricType.Maximize;
+		else throw new ParseException("Unrecognised optimisation metric -- must be \"maximize\" or \"minimize\".");
+	}
+}

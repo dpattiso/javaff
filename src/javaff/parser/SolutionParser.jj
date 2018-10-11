@@ -1,0 +1,948 @@
+options
+{
+    LOOKAHEAD=20;
+    FORCE_LA_CHECK=true;
+    IGNORE_CASE=true;
+    STATIC=false;
+    OUTPUT_DIRECTORY="src/javaff/parser/";
+}
+
+PARSER_BEGIN(SolutionParser)
+
+package javaff.parser;
+
+import javaff.JavaFF;
+import javaff.data.*;
+import javaff.data.strips.*;
+import javaff.data.metric.*;
+import javaff.data.temporal.*;
+
+import java.io.PrintStream;
+import java.io.File;
+import java.io.FileReader;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Map;
+import java.util.Hashtable;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.Iterator;
+
+import java.math.BigDecimal;
+
+public class SolutionParser
+{
+	protected static TotalOrderPlan TP = new TotalOrderPlan();
+
+    private static TotalOrderPlan parseSolutionFile(File pFile)
+    {
+		boolean req = false;
+        try
+        {
+            FileReader tFileReader = new FileReader(pFile);
+			SolutionParser parser = new SolutionParser(tFileReader);
+            req = parser.parseDomain();
+            tFileReader.close();
+		}
+		catch (FileNotFoundException e)
+		{
+            JavaFF.parsingOutput.println("File "+pFile+" has not been found");
+            req = false;
+		}
+		catch (IOException e)
+		{
+            JavaFF.parsingOutput.println("Unknown IOException caught");
+            JavaFF.parsingOutput.println(e.getMessage());
+            req = false;
+		}
+        catch (ParseException e)
+        {
+            JavaFF.parsingOutput.println("Error whilst parsing file "+pFile);
+            JavaFF.parsingOutput.println(e.getMessage());
+            req = false;
+        }
+        if (req) JavaFF.parsingOutput.println("Parsed Domain file "+pFile+" successfully");
+		else JavaFF.parsingOutput.println("Parsing of Domain file "+pFile+" failed");
+		return req;
+    }
+}
+
+PARSER_END(SolutionParser)
+
+SKIP :
+{
+    " "
+|   "\r"
+|   "\t"
+|   "\n"
+}
+
+TOKEN:
+{
+    < OPEN: "(" >
+|   < CLOSE: ")" >
+|   < DEFINE: "define" >
+|   < DOMAIN: "domain" >
+|   < DOMAIN_LABEL: ":domain" >
+|   < OBJECTS: ":objects" >
+|   < GOAL: ":goal" >
+|   < INIT: ":init" >
+|   < METRIC: ":metric" >
+|   < PROBLEM: "problem" >
+|   < REQUIREMENTS: ":requirements" >
+|   < REQUIREMENT_LABELS: ":typing" | ":strips" | ":fluents" | ":durative-actions" | ":duration-inequalities" | ":numeric-fluents" | ":action-costs">
+|   < NON_HANDLED_LABELS: ":negative-preconditions" | ":disjunctive-preconditions" | ":existential-preconditions" | "universal-preconditions" | "quantified-preconditions" | ":conditional-effects" | ":adl" | ":derived-predicates" | ":timed-initial-literals">
+|   < TYPES: ":types" >
+|   < EITHER: "either" >
+|   < CONSTANTS: ":constants" >
+|   < PREDICATES: ":predicates" >
+|   < FUNCTIONS: ":functions" >
+|   < ACTION: ":action" >
+|   < DURATIVE_ACTION: ":durative-action">
+|   < PARAMETERS: ":parameters" >
+|   < DURATION: ":duration" >
+|   < DUR_VAR: "?duration" >
+|   < PRECONDITION: ":precondition" >
+|   < CONDITION: ":condition" >
+|   < EFFECT: ":effect" >
+|   < AND: "and" >
+|   < NOT: "not" >
+|   < OVER_ALL: "over all" >
+|   < AT_START: "at start" >
+|   < AT_END: "at end" >
+|   < EQUALS: "=" >
+|   < TYPE_IDENT: "-" >
+|   < BINARY_OP:  "+" | "*" | "/" >
+|   < BINARY_COMP: "<" | ">" | "=" | ">=" | "<=" >
+|   < ASSIGN_OP: <ASSIGN> | <SCALE_UP> | <SCALE_DOWN> | <INCREASE> | <DECREASE> >
+|   < ASSIGN: "assign">
+|   < SCALE_UP: "scale-up">
+|   < SCALE_DOWN: "scale-down">
+|   < INCREASE: "increase">
+|   < DECREASE: "decrease">
+|   < OPTIMIZATION: <MINIMIZE>|<MAXIMIZE> >
+|   < MINIMIZE: "minimize">
+|   < MAXIMIZE: "maximize">
+|	< TOTAL_TIME: "total-time">
+|   < NUMBER_TYPE: "number">
+|   < VAR: "?" <NAME> >
+|   < NUMBER: (["0"-"9"])+ ("." (["0"-"9"])+)? >
+|   < NAME: (["a"-"z", "_", "A"-"Z", "0"-"9", "-"])+ >
+}
+
+SPECIAL_TOKEN: 
+{
+    <SINGLE_LINE_COMMENT: (";")+ (~["\n", "\r"])* ("\n" | "\r" | "\r\n")>
+}
+
+// ******************************************************************************
+// *																			*
+// * 							Parse the Domain File							*
+// *																			*
+// ******************************************************************************
+
+boolean parseDomain():
+{
+    Token t;
+	boolean req = true;
+}
+{
+    <OPEN>  <DEFINE>  <OPEN> <DOMAIN> t=<NAME> <CLOSE>
+    {
+		UP.DomainName = t.toString().toLowerCase();
+    }
+    (req = parseRequireDef())?
+	{if (!req) return false;}
+    (parseTypeDef())?
+    (parseConstantsDef())?
+    (parsePredicatesDef())?
+    (parseFunctionsDef())?
+    (parseStructureDef())*
+    <CLOSE>
+    <EOF>
+	{return true;}
+}
+
+
+// ***************************************************
+// *	Parse the requirement definitions
+// ***************************************************
+boolean parseRequireDef():
+{
+	Token t;
+}
+{
+     <OPEN> <REQUIREMENTS> ( t = <REQUIREMENT_LABELS> {UP.requirements.add(t.toString().toLowerCase());} | t = <NON_HANDLED_LABELS> {JavaFF.parsingOutput.println("cannnot parse "+t.toString().toLowerCase()); return false; })* <CLOSE> {return true;}
+}
+
+// ***************************************************
+// *	Parse the type definitions
+// ***************************************************
+void parseTypeDef():
+{
+    Type t;
+	Set types;	
+}
+{
+    <OPEN> <TYPES> 
+	({types = new HashSet();}
+	(t=parsePrimitiveType()
+	{ types.add(t); }
+	)+ (<TYPE_IDENT> t=parseType()
+	{
+		Iterator tit = types.iterator();
+		while (tit.hasNext())
+		{
+			SimpleType type = (SimpleType) tit.next();
+			type.setSuperType(t);
+
+			UP.TypeGraph.addType(type, t);
+		}
+	}
+	))*
+	(t=parsePrimitiveType())*
+	<CLOSE>
+}
+
+Type parseType():
+{
+	Type t;
+}
+{
+	(
+	t = parsePrimitiveType()
+|	t = parseEitherType()
+	)
+	{ return t; }
+}
+
+SimpleType parsePrimitiveType():
+{
+	Token t;
+}
+{
+	t=<NAME>
+	{
+		String typeStr = t.toString().toLowerCase();
+		SimpleType type = (SimpleType) UP.typeMap.get(typeStr);
+		if (type == null)
+		{
+			type = new SimpleType(typeStr);
+			UP.types.add(type);
+			UP.typeMap.put(typeStr, type);
+			
+			UP.TypeGraph.addType(type);
+		}
+		return type;
+	}
+}
+
+EitherType parseEitherType():
+{
+	EitherType et = new EitherType();
+	SimpleType st;
+}
+{
+	<OPEN> <EITHER> (st = parsePrimitiveType() { et.addType(st); } )+ <CLOSE>
+	{ return et; }
+}
+
+// ***************************************************
+// *	Parse a TypedList
+// ***************************************************
+
+TypedList parseTypedList():
+{
+    List strings = new ArrayList();
+	Type type;
+    Token t;
+    TypedList rList = new TypedList();
+    TypedList tList;
+}
+{    
+    (((((t=<NAME>)|(t=<VAR>))
+    { strings.add(t.toString().toLowerCase());  })+ 
+    <TYPE_IDENT> type=parseType() 
+    {
+		Iterator tit = strings.iterator();
+		while (tit.hasNext())
+		{
+			String string = (String) tit.next();
+			rList.add(string, type);
+		}
+    }
+    (
+		tList=parseTypedList()
+		{
+			rList.objects.addAll(tList.objects);
+			rList.types.putAll(tList.types);
+		}
+    ))
+|   ((((t=<NAME>)|(t=<VAR>)) { rList.add(t.toString().toLowerCase());  })*))
+    {
+		return rList;
+    }
+}
+
+
+
+// ***************************************************
+// *	Parse the constants
+// ***************************************************
+
+void parseConstantsDef():
+{
+	TypedList tl;
+}
+{
+	<OPEN> <CONSTANTS> tl=parseTypedList() <CLOSE>
+	{
+		Iterator it = tl.objects.iterator();
+		while (it.hasNext())
+		{
+			String str = (String) it.next();
+//			PDDLObject c =  new PDDLObject(str);
+			Constant c = new Constant(str);
+			c.setType((Type)tl.types.get(str));
+			UP.Constants.add(c);
+			UP.ConstantMap.put(str, c);
+		}			
+	}
+}
+
+// ***************************************************
+// *	Parse the predicates
+// ***************************************************
+
+void parsePredicatesDef():
+{
+}
+{
+    <OPEN> <PREDICATES> (parsePredicate())+ <CLOSE>
+}
+
+void parsePredicate():
+{
+    PredicateSymbol ps;
+	TypedList tl;
+}
+{
+    <OPEN> ps=parsePredicateSymbol() 
+	
+	tl = parseTypedList()
+	{
+		Iterator it = tl.objects.iterator();
+		while (it.hasNext())
+		{
+			String str = (String) it.next();
+			Variable v =  new Variable(str);
+			v.setType((Type)tl.types.get(str));
+			ps.addVar(v);
+		}		
+		UP.predSymbols.add(ps);
+	}
+	<CLOSE>
+}
+
+PredicateSymbol parsePredicateSymbol():
+{
+    Token t;
+}
+{
+    t=<NAME> 
+	{
+		PredicateSymbol ps = (PredicateSymbol) UP.predSymbolMap.get(t.toString().toLowerCase());
+		if (ps == null)
+		{
+			ps = new PredicateSymbol(t.toString().toLowerCase());
+			UP.predSymbolMap.put(t.toString().toLowerCase(), ps);
+		}
+		return ps;
+	}
+}
+
+// ***************************************************
+// *	Parse a STRIPS action
+// ***************************************************
+
+void parseStructureDef():
+{
+}
+{
+    parseActionDef()
+|   parseDurActionDef()
+}
+
+void parseActionDef():
+{
+    UngroundInstantAction a = new UngroundInstantAction();
+    TypedList tl;
+	Map varMap = new Hashtable();
+}
+{
+    <OPEN> <ACTION> a.name=parseOperatorName() <PARAMETERS> <OPEN> tl=parseTypedList() <CLOSE> 
+    {
+		UP.actions.add(a);
+		Iterator it = tl.objects.iterator();
+		while (it.hasNext())
+		{
+			String str = (String) it.next();
+			Variable v = new Variable(str);
+			v.setType((Type) tl.types.get(str));
+			a.params.add(v);
+			varMap.put(str,v);
+		}
+    }
+	parseActionDefBody(a, varMap) <CLOSE>
+}
+
+OperatorName parseOperatorName():
+{
+    Token t;
+}
+{
+    t=<NAME> {return new OperatorName(t.toString().toLowerCase()); }
+}
+
+void parseActionDefBody(UngroundInstantAction a, Map varMap):
+{
+	Condition c;
+	Effect e;
+}
+{
+    ( <PRECONDITION> c = parseGD(varMap, false) { a.condition = (UngroundCondition) c;})?
+    ( <EFFECT> e = parseEffect(varMap) { a.effect = (UngroundEffect) e; })?
+}
+
+// **********************************
+// *	Parse Goal Definition
+// **********************************
+
+// Map m is the variableMap
+// boolean ground is wheather it is ground or not (i.e. in an action or in the initial state)
+Condition parseGD(Map m, boolean ground):
+{
+	Literal p;
+	Condition c;
+	AND and;
+}
+{
+	(<OPEN> <CLOSE> { return TrueCondition.getInstance(); })
+|	(p = parseAtomicFormula(m, ground) {return p;})
+|	(<OPEN> <AND> {and = new AND();} (c = parseGD(m, ground) { and.add(c);} )* <CLOSE> {return and;})
+|	(c = parseFComp(m) {return c;})
+}
+
+
+Literal parseAtomicFormula(Map m, boolean ground):
+{
+	PredicateSymbol p;
+	TypedList tl;
+}
+{
+	<OPEN> p = parsePredicateSymbol() tl = parseTypedList() <CLOSE>
+	{
+		Literal lit;
+		if (ground) lit = new Proposition(p);
+		else lit = new Predicate(p);
+		Iterator it = tl.objects.iterator();
+		while (it.hasNext())
+		{
+			String str = (String) it.next();
+			Parameter o = null;
+			if (m != null) o = (Parameter) m.get(str);
+            if (o == null) o = (Parameter) UP.ConstantMap.get(str);
+            if (o == null) o = (Parameter) UP.objectMap.get(str);
+			lit.addParameter(o);
+		}
+		return lit;
+	}
+}
+
+
+
+// **********************************
+// *	Parse Effect
+// **********************************
+
+Effect parseEffect(Map m):
+{
+	Effect c;
+	AND and;
+}
+{
+	(<OPEN> <CLOSE> { return NullEffect.getInstance(); })
+|	(c = parseCEffect(m) { return c; })
+|	(<OPEN> <AND> {and = new AND();} (c = parseCEffect(m) { and.add(c);} )* <CLOSE> {return and;})
+}
+
+Effect parseCEffect(Map m):
+{
+	Effect p;
+}
+{
+	p = parsePEffect(m) {return p;}
+}
+
+Effect parsePEffect(Map m):
+{
+	Literal p;
+	ResourceOperator ro;
+}
+{
+	(p = parseAtomicFormula(m, false) {return p;})
+|	(<OPEN> <NOT> p = parseAtomicFormula(m, false) <CLOSE> {return new NOT(p);})
+|	ro = parseResourceOperator(m) {return ro;}
+}
+
+// ***************************************************
+// *	Parse Metrics
+// ***************************************************
+
+
+// **********************************
+// *	Parse Function Definitions
+// **********************************
+
+void parseFunctionsDef():
+{
+	TypedList tl;
+}
+{
+	<OPEN> <FUNCTIONS> (parseFunctionSkeleton())+ <CLOSE>
+}
+
+void parseFunctionSkeleton():
+{
+    FunctionSymbol fs;
+	TypedList tl;
+}
+{
+    <OPEN> fs=parseFunctionSymbol()
+	
+	tl = parseTypedList()
+	{
+		Iterator it = tl.objects.iterator();
+		while (it.hasNext())
+		{
+			String str = (String) it.next();
+			Variable v =  new Variable(str);
+			v.setType((Type)tl.types.get(str));
+			fs.addVar(v);
+		}		
+		UP.funcSymbols.add(fs);
+	}
+	<CLOSE> (<TYPE_IDENT> <NUMBER_TYPE>)?
+}
+
+FunctionSymbol parseFunctionSymbol():
+{
+    Token t;
+}
+{
+    t=<NAME>
+	{
+		FunctionSymbol fs = (FunctionSymbol) UP.funcSymbolMap.get(t.toString().toLowerCase());
+		if (fs == null)
+		{
+			fs = new FunctionSymbol(t.toString().toLowerCase());
+			UP. funcSymbolMap.put(t.toString().toLowerCase(), fs);
+		}
+		return fs;
+	}
+}
+
+// **********************************
+// *	Parse Function Comparators
+// **********************************
+
+BinaryComparator parseFComp(Map varMap):
+{
+	Token t1;
+	Function f1, f2;
+	
+}
+{
+	<OPEN> t1=<BINARY_COMP> f1=parseFExp(varMap) f2=parseFExp(varMap) <CLOSE>
+	{
+		BinaryComparator bc = new BinaryComparator(t1.toString().toLowerCase(), f1, f2);
+		return bc;
+	}
+}
+
+Function parseFExp(Map varMap):
+{
+	Token t1;
+	Function f1, f2;
+}
+{
+	(t1 = <NUMBER> {return new NumberFunction(Double.parseDouble(t1.toString().toLowerCase()));})
+|	(<OPEN> t1=<BINARY_OP> f1=parseFExp(varMap) f2=parseFExp(varMap) <CLOSE>
+	{
+		BinaryFunction bf = new BinaryFunction(t1.toString().toLowerCase(), f1, f2);
+		return bf;
+	})
+|	(<OPEN> t1=<TYPE_IDENT> f1=parseFExp(varMap) f2=parseFExp(varMap) <CLOSE>
+	{
+		BinaryFunction bf = new BinaryFunction(t1.toString().toLowerCase(), f1, f2);
+		return bf;
+	})
+|	(<OPEN> t1=<TYPE_IDENT> f1=parseFExp(varMap) <CLOSE>
+	{
+		BinaryFunction bf = new BinaryFunction(t1.toString().toLowerCase(), new NumberFunction(0), f1);
+		return bf;
+	})
+|	(f1 = parseFHead(varMap) {return f1;})
+}
+
+NamedFunction parseFHead(Map varMap):
+{
+	FunctionSymbol f;
+	TypedList tl;
+}
+{
+	(<OPEN> f = parseFunctionSymbol() tl = parseTypedList() <CLOSE>
+	{
+		NamedFunction nf = new NamedFunction(f);
+		Iterator it = tl.objects.iterator();
+		while (it.hasNext())
+		{
+			String str = (String) it.next();
+			Parameter o = null;
+			if (varMap != null) o = (Parameter) varMap.get(str);
+            if (o == null) o = (Parameter) UP.ConstantMap.get(str);
+            if (o == null) o = (Parameter) UP.objectMap.get(str);
+			nf.addParameter(o);
+		}
+		return nf;
+	})
+	
+|	((<OPEN>)? <TOTAL_TIME> (<CLOSE>)? { return TotalTimeFunction.getInstance();})
+|	(f = parseFunctionSymbol()
+	{
+		NamedFunction nf = new NamedFunction(f);
+		return nf;
+	})
+}
+
+// **********************************
+// *	Parse Resource Operators
+// **********************************
+
+ResourceOperator parseResourceOperator(Map varMap):
+{
+	Token t1; 
+	NamedFunction f1;
+	Function f2;
+}
+{
+	<OPEN> t1=<ASSIGN_OP> f1=parseFHead(varMap) f2=parseFExp(varMap) <CLOSE>
+	{
+		return new ResourceOperator(t1.toString().toLowerCase(), f1, f2);
+	}
+}
+
+// ***************************************************
+// *	Parse Temporal
+// ***************************************************
+
+// **********************************
+// *	Parse Durative Action
+// **********************************
+
+void parseDurActionDef():
+{
+    UngroundDurativeAction a = new UngroundDurativeAction();
+    TypedList tl;
+	Map varMap = new Hashtable();
+}
+{
+    <OPEN> <DURATIVE_ACTION> a.name=parseOperatorName() <PARAMETERS> <OPEN> tl=parseTypedList() <CLOSE> 
+    {
+		UP.actions.add(a);
+		Iterator it = tl.objects.iterator();
+		while (it.hasNext())
+		{
+			String str = (String) it.next();
+			Variable v = new Variable(str);
+			v.setType((Type) tl.types.get(str));
+			a.params.add(v);
+			varMap.put(str,v);
+		}
+    }
+	parseDurativeActionDefBody(a, varMap) {a.makeInstants();} <CLOSE>
+}
+
+void parseDurativeActionDefBody(UngroundDurativeAction da, Map varMap):
+{
+	DurationConstraint dc;
+}
+{
+	<DURATION> dc=parseDurationConstraint(da, varMap) {da.durationConstraint = dc;}
+	<CONDITION> parseDAGD(da, varMap)
+	<EFFECT> parseDAEffect(da, varMap)
+}
+
+// **********************************
+// *	Parse Durative Action Conditions
+// **********************************
+
+void parseDAGD(UngroundDurativeAction da, Map varMap):
+{
+}
+{
+	parseTimedGD(da, varMap)
+|	(<OPEN> <AND> (parseTimedGD(da, varMap))+ <CLOSE>)
+}
+
+void parseTimedGD(UngroundDurativeAction da, Map varMap):
+{
+	Condition c;
+}
+{
+	(<OPEN> <AT_START> c=parseGD(varMap, false) <CLOSE> { ((AND) da.startCondition).add(c); })
+|	(<OPEN> <AT_END> c=parseGD(varMap, false) <CLOSE> { ((AND) da.endCondition).add(c); })
+|	(<OPEN> <OVER_ALL> c=parseGD(varMap, false) <CLOSE> { ((AND) da.invariant).add(c); })
+}
+
+// **********************************
+// *	Parse Duration
+// **********************************
+
+DurationConstraint parseDurationConstraint(UngroundDurativeAction da, Map varMap):
+{
+	SimpleDurationConstraint sdc;
+	DurationConstraint dc;
+}
+{
+	(<OPEN> <AND> {dc = new DurationConstraint();} (sdc = parseSimpleDurationConstraint(da, varMap)
+	{
+		dc.add(sdc);
+	}
+	)+ <CLOSE> {return dc;})
+|	sdc = parseSimpleDurationConstraint(da, varMap) {return sdc; }
+}
+
+SimpleDurationConstraint parseSimpleDurationConstraint(UngroundDurativeAction da, Map varMap):
+{
+	int t;
+	Function f;
+}
+{
+	<OPEN> t=parseDOp() <DUR_VAR> f=parseFExp(varMap) <CLOSE>
+	{
+		SimpleDurationConstraint s = new SimpleDurationConstraint(da.duration, f, t);
+		return s;
+	}
+}
+
+int parseDOp():
+{
+	Token t;
+}
+{
+	(t=<BINARY_COMP> | t=<EQUALS>)
+	{
+		int i = MetricSymbolStore.getType(t.toString().toLowerCase());
+		if (i == MetricSymbolStore.LESS_THAN) i = MetricSymbolStore.LESS_THAN_EQUAL;
+		else if (i == MetricSymbolStore.GREATER_THAN) i = MetricSymbolStore.GREATER_THAN_EQUAL;
+		return i;
+	}
+
+}
+
+// **********************************
+// *	Parse Durative Action Effects
+// **********************************
+
+void parseDAEffect(UngroundDurativeAction da, Map varMap):
+{
+}
+{
+	parseTimedEffect(da, varMap)
+|	(<OPEN> <AND> (parseDAEffect(da, varMap))* <CLOSE>) 
+}
+
+void parseTimedEffect(UngroundDurativeAction da, Map varMap):
+{
+	Effect e;
+}
+{
+	(<OPEN> <AT_START> e=parseEffect(varMap) <CLOSE> {((AND)da.startEffect).add(e);})
+|	(<OPEN> <AT_START> e=parseFAssignDA(da, varMap) <CLOSE> {((AND)da.startEffect).add(e);})
+|	(<OPEN> <AT_END> e=parseEffect(varMap) <CLOSE> {((AND)da.endEffect).add(e);})
+|	(<OPEN> <AT_END> e= parseFAssignDA(da, varMap) <CLOSE> {((AND)da.endEffect).add(e);})
+}
+
+ResourceOperator parseFAssignDA(UngroundDurativeAction da, Map varMap):
+{
+	Token t1; 
+	NamedFunction f1;
+	Function f2;
+}
+{
+	<OPEN> t1=<ASSIGN_OP> f1=parseFHead(varMap) f2=parseFExpDA(da,varMap) <CLOSE>
+	{
+		return new ResourceOperator(t1.toString().toLowerCase(), f1, f2);
+	}
+}
+
+Function parseFExpDA(UngroundDurativeAction da, Map varMap):
+{
+	Token t1;
+	Function f1, f2;
+}
+{
+	(t1 = <NUMBER> {return new NumberFunction(Double.parseDouble(t1.toString().toLowerCase()));})
+|	(<OPEN> t1=<BINARY_OP> f1=parseFExpDA(da, varMap) f2=parseFExpDA(da, varMap) <CLOSE>
+	{
+		BinaryFunction bf = new BinaryFunction(t1.toString().toLowerCase(), f1, f2);
+		return bf;
+	})
+|	(<OPEN> t1=<TYPE_IDENT> f1=parseFExpDA(da, varMap) f2=parseFExpDA(da, varMap) <CLOSE>
+	{
+		BinaryFunction bf = new BinaryFunction(t1.toString().toLowerCase(), f1, f2);
+		return bf;
+	})
+|	(<OPEN> t1=<TYPE_IDENT> f1=parseFExpDA(da, varMap) <CLOSE>
+	{
+		BinaryFunction bf = new BinaryFunction(t1.toString().toLowerCase(), new NumberFunction(0), f1);
+		return bf;
+	})
+|	(<DUR_VAR> {return da.duration;})
+|	(f1 = parseFExp(varMap) {return f1;})
+}
+
+
+
+
+// ******************************************************************************
+// *																			*
+// * 							Parse the Problem File							*
+// *																			*
+// ******************************************************************************
+
+boolean parseProblem():
+{
+    Token t, t2;
+}
+{
+    <OPEN> <DEFINE> <OPEN> <PROBLEM> t=<NAME> <CLOSE>
+    <OPEN> <DOMAIN_LABEL> t2=<NAME> <CLOSE>
+    {
+		UP.ProblemName = t.toString().toLowerCase();
+		UP.ProblemDomainName = t2.toString().toLowerCase();
+		if (!UP.DomainName.toLowerCase().equals(t2.toString().toLowerCase())) 
+			JavaFF.parsingOutput.println("Warning Domain Name and Problem Name do not match");
+    }
+    
+    (parseRequireDef())?
+    (parseObjectDeclaration())?
+    parseInit()
+    parseGoal()
+	(parseMetric())?
+    <CLOSE> <EOF>
+    { return true; }
+}
+
+
+// ***************************************************
+// *	Parse the objects
+// ***************************************************
+
+void parseObjectDeclaration():
+{
+    TypedList tl;
+}
+{
+    <OPEN> <OBJECTS> tl=parseTypedList() <CLOSE>
+	{
+		Iterator it = tl.objects.iterator();
+		while (it.hasNext())
+		{
+			String str = (String) it.next();
+			PDDLObject o = new PDDLObject(str, (Type) tl.types.get(str));
+			UP.objects.add(o);
+			UP.objectMap.put(str, o);
+		}
+    } 
+    
+}
+
+// ***************************************************
+// *	Parse the Initial State
+// ***************************************************
+
+void parseInit():
+{
+}
+{
+    <OPEN> <INIT> (parseInitEl())+ <CLOSE>
+}
+
+void parseInitEl():
+{
+    Proposition pp;
+	NamedFunction nf;
+	Token t1;
+}
+{
+    pp=  parseLiteralName() {UP.initial.add(pp);}
+|	<OPEN> <EQUALS> nf = parseFHead(null) t1 = <NUMBER> <CLOSE>
+	{
+		UP.funcValues.put(nf, new BigDecimal(Double.parseDouble(t1.toString().toLowerCase())));
+	}
+}
+
+Literal parseLiteralName():
+{
+    Literal pp;
+}
+{
+    pp = parseAtomicFormula(UP.objectMap, true) {return pp;}
+}
+
+// **********************************
+// *	Parse Goal
+// **********************************
+
+void parseGoal():
+{
+	Condition e;
+}
+{
+    <OPEN> <GOAL> e = parseGD(UP.objectMap, true) <CLOSE>
+	{ UP.goal = (GroundCondition) e; }
+}
+
+// **********************************
+// *	Parse Metric
+// **********************************
+
+void parseMetric():
+{
+	int type;
+	Function f1;
+}
+{
+	<OPEN> <METRIC> type=parseOptimization() f1=parseFExp(UP.objectMap) <CLOSE>
+	{
+		UP.metric = new Metric(type, f1);
+	}
+}
+
+int parseOptimization():
+{
+	Token t1;
+}
+{
+	t1=<OPTIMIZATION> 
+	{
+		if (t1.toString().toLowerCase().equals("minimize")) return Metric.MINIMIZE;
+		else if (t1.toString().toLowerCase().equals("maximize")) return Metric.MAXIMIZE;
+		else return -1;
+	}
+}
