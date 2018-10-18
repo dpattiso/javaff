@@ -1,10 +1,10 @@
 # JavaFF2.1
-An implementation of the [FF](http://www.loria.fr/~hoffmanj/ff.html) forward search planning system in Java. JavaFF 2.1 is itself a branch of JavaFF planner by Andrew Coles, to allow parsing and solving of PDDL 2.1 problems. Additional improvements include optimisation to enable order-of-magnitude speedups over vanilla JavaFF. This is most likely version 2.1.8, which supports STRIPS and ADL planning, but not metrics and temporal aspects. The code to do this exists within JavaFF but has been disabled (somewhere) as it was unnecessary and introduced additional complexity. 
+An implementation of the [FF](https://fai.cs.uni-saarland.de/hoffmann/ff.html) forward search planning system in Java. JavaFF 2.1 is itself a branch of [JavaFF](https://nms.kcl.ac.uk/planning/software/javaff.html) planner by Andrew Coles, to allow parsing and solving of PDDL 2.1 problems. Additional improvements include optimisation to enable order-of-magnitude speedups over vanilla JavaFF. This is most likely version 2.1.8, which supports STRIPS and ADL planning, but not metrics and temporal aspects. The code to do this exists within JavaFF but has been disabled (somewhere) as it was unnecessary and introduced additional complexity. 
 
 Older versions of JavaFF are kicking about Github in various places via people who requested the code personally, most likely JavaFF 2.1.5. See http://personal.strath.ac.uk/david.pattison/ (while it is still available) for this and other older versions.
 
 # Usage
-The usage of the code is the same as vanilla JavaFF. In other words, run javaff.JavaFF.main() with a domain and problem file.  Be sure to add the contents of the /lib directory to the classpath.
+The usage of the code is the same as [vanilla JavaFF](https://nms.kcl.ac.uk/planning/software/javaff.html). In other words, run javaff.JavaFF.main() with a domain and problem file.  Be sure to add the contents of the /lib directory to the classpath.
 
 # Citation
 
